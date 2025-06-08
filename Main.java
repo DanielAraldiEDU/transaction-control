@@ -6,15 +6,16 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
   private static final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+  // Random number generator for simulating transaction delays
   private static final Random random = new Random();
   private static final int NUM_THREADS = 5;
   private static final DeadlockDetector deadlockDetector = new DeadlockDetector();
 
-  // Recursos compartilhados X e Y
+  // Resource shared X and Y
   private static final DataItem resourceX = new DataItem("X");
   private static final DataItem resourceY = new DataItem("Y");
 
-  // Mapa de transações ativas (para controle de timestamp)
+  // Map of active transactions (for timestamp control)
   private static final ConcurrentHashMap<Integer, Transaction> activeTransactions = new ConcurrentHashMap<>();
 
   public static void main(String[] args) {
@@ -22,36 +23,36 @@ public class Main {
 
     ExecutorService executor = Executors.newFixedThreadPool(NUM_THREADS + 1);
 
-    // Thread para detecção de deadlock
+    // This thread will periodically check for deadlocks
     executor.submit(deadlockDetector);
 
-    // Criar e iniciar N threads de transação
+    // Create and start the main transaction threads
     for (int i = 1; i <= NUM_THREADS; i++) {
       Transaction transaction = new Transaction(i);
       activeTransactions.put(i, transaction);
       executor.submit(transaction);
     }
 
-    // Aguardar um tempo para observar o comportamento
+    // Wait a time to allow transactions to start
     try {
-      Thread.sleep(30000); // 30 segundos
+      Thread.sleep(30000); // 30 seconds
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
 
-    // Finalizar execução
+    // Finalize execution
     deadlockDetector.stop();
     executor.shutdownNow();
     System.out.println("\n=== FIM DA SIMULAÇÃO ===");
   }
 
-  // Método para log com timestamp
+  // Log method with timestamp
   private static void logMessage(String threadName, String message) {
     String timestamp = LocalTime.now().format(timeFormatter);
     System.out.println("[" + timestamp + "] T(" + threadName + ") " + message);
   }
 
-  // Classe que representa um item de dados com bloqueio
+  // Class that represents a data item with locking
   static class DataItem {
     private final String itemId;
     private volatile boolean valorLock = false;
@@ -67,20 +68,20 @@ public class Main {
       internalLock.lock();
       try {
         if (!valorLock) {
-          // Recurso disponível
+          // Resource available
           valorLock = true;
           transacao = transaction;
           logMessage(transaction.getId() + "", "obtém o bloqueio do recurso " + itemId);
           return true;
         } else {
-          // Recurso ocupado - aplicar wait-die
+          // Resource occupied - apply wait-die
           if (transaction.getTimestamp() < transacao.getTimestamp()) {
-            // Transação mais antiga espera
+            // Older transaction waits
             fila.offer(transaction);
             logMessage(transaction.getId() + "", "está esperando pelo recurso " + itemId + " (wait-die: mais antiga)");
             return false;
           } else {
-            // Transação mais nova "morre"
+            // The newest transaction is dead
             logMessage(transaction.getId() + "", "é finalizada em virtude de deadlock detectado (wait-die: mais nova)");
             transaction.abort();
             return false;
@@ -99,7 +100,7 @@ public class Main {
           valorLock = false;
           transacao = null;
 
-          // Notificar próxima transação na fila
+          // Notify the next transaction in the queue
           Transaction next = fila.poll();
           if (next != null && !next.isAborted()) {
             synchronized (next) {
@@ -129,7 +130,7 @@ public class Main {
     }
   }
 
-  // Classe que representa uma transação (thread)
+  // Class that represents a transaction (thread)
   static class Transaction implements Runnable {
     private final int id;
     private final long timestamp;
@@ -160,47 +161,48 @@ public class Main {
     }
 
     private void executeTransaction() throws InterruptedException {
-      // random(t) - tempo inicial
+      // Initial time
       randomWait();
       if (aborted)
         return;
 
-      // Tentar obter lock(X)
+      // Try to obtain lock(X)
       boolean gotX = false;
       while (!gotX && !aborted) {
         gotX = resourceX.tryLock(this);
         if (!gotX && !aborted) {
           synchronized (this) {
-            wait(1000); // Esperar por notificação ou timeout
+            wait(1000); // Wait for notification or timeout
           }
         }
       }
+
       if (aborted)
         return;
 
-      // random(t)
       randomWait();
       if (aborted) {
         resourceX.unlock(this);
         return;
       }
 
-      // Tentar obter lock(Y)
+      // Try to obtain lock(Y)
       boolean gotY = false;
       while (!gotY && !aborted) {
         gotY = resourceY.tryLock(this);
         if (!gotY && !aborted) {
           synchronized (this) {
-            wait(1000); // Esperar por notificação ou timeout
+            wait(1000); // Wait for notification or timeout
           }
         }
       }
+
       if (aborted) {
         resourceX.unlock(this);
         return;
       }
 
-      // random(t) - trabalho crítico
+      // Critical work
       randomWait();
       if (aborted) {
         resourceY.unlock(this);
@@ -211,7 +213,6 @@ public class Main {
       // unlock(X)
       resourceX.unlock(this);
 
-      // random(t)
       randomWait();
       if (aborted) {
         resourceY.unlock(this);
@@ -221,18 +222,17 @@ public class Main {
       // unlock(Y)
       resourceY.unlock(this);
 
-      // random(t)
       randomWait();
       if (aborted)
         return;
 
-      // commit(t)
       commit();
     }
 
     private void randomWait() throws InterruptedException {
       if (!aborted) {
-        int waitTime = random.nextInt(1000) + 500; // 500-1500ms
+        // Time between 500ms and 1500ms
+        int waitTime = random.nextInt(1000) + 500;
         Thread.sleep(waitTime);
       }
     }
@@ -249,14 +249,15 @@ public class Main {
       aborted = true;
       logMessage(id + "", "transação abortada - reiniciando...");
 
-      // Remover da fila de espera dos recursos
+      // Remove from wait resource queue
       resourceX.getQueue().remove(this);
       resourceY.getQueue().remove(this);
 
-      // Reiniciar transação após um delay
+      // Restart transaction after a delay
       new Thread(() -> {
         try {
-          Thread.sleep(random.nextInt(2000) + 1000); // 1-3 segundos
+          // Sleep between 1 and 3 seconds
+          Thread.sleep(random.nextInt(2000) + 1000);
           Transaction newTransaction = new Transaction(id);
           activeTransactions.put(id, newTransaction);
           new Thread(newTransaction).start();
@@ -283,7 +284,7 @@ public class Main {
     }
   }
 
-  // Detector de deadlock usando grafo de espera
+  // Deadlock detector using wait-for graph
   static class DeadlockDetector implements Runnable {
     private volatile boolean running = true;
 
@@ -291,7 +292,8 @@ public class Main {
     public void run() {
       while (running) {
         try {
-          Thread.sleep(2000); // Verificar a cada 2 segundos
+          // Check every 2 seconds
+          Thread.sleep(2000);
           detectDeadlock();
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
@@ -301,10 +303,10 @@ public class Main {
     }
 
     private void detectDeadlock() {
-      // Construir grafo de espera
-      Map<Transaction, Set<Transaction>> waitForGraph = new HashMap<>();
+      // Build wait-for graph
+      Map<Transaction, Set<Transaction>> waitForGraph = new HashMap<Transaction, Set<Transaction>>();
 
-      // Analisar recurso X
+      // Analyze resource X
       if (resourceX.isLocked()) {
         Transaction holder = resourceX.getCurrentTransaction();
         for (Transaction waiter : resourceX.getQueue()) {
@@ -314,7 +316,7 @@ public class Main {
         }
       }
 
-      // Analisar recurso Y
+      // Analyze resource Y
       if (resourceY.isLocked()) {
         Transaction holder = resourceY.getCurrentTransaction();
         for (Transaction waiter : resourceY.getQueue()) {
@@ -324,7 +326,7 @@ public class Main {
         }
       }
 
-      // Detectar ciclos no grafo
+      // Detect cycles in the graph
       Set<Transaction> visited = new HashSet<>();
       Set<Transaction> recursionStack = new HashSet<>();
 
@@ -332,13 +334,16 @@ public class Main {
         if (!visited.contains(transaction)) {
           if (hasCycle(transaction, waitForGraph, visited, recursionStack)) {
             logMessage("DeadlockDetector", "DEADLOCK DETECTADO! Aplicando wait-die...");
-            // O wait-die já é aplicado automaticamente no tryLock
+            // The wait-die is already applied automatically in tryLock
             break;
           }
         }
       }
     }
 
+    // Cycle detection in the wait-for graph
+    // T1 → {T2} (T1 waits T2)
+    // T2 → {T1} (T2 waits T1)
     private boolean hasCycle(Transaction node, Map<Transaction, Set<Transaction>> graph,
         Set<Transaction> visited, Set<Transaction> recursionStack) {
       visited.add(node);
@@ -348,10 +353,12 @@ public class Main {
       if (neighbors != null) {
         for (Transaction neighbor : neighbors) {
           if (!visited.contains(neighbor)) {
+            // Case 1: Neighbor has never been visited - recursion
             if (hasCycle(neighbor, graph, visited, recursionStack)) {
               return true;
             }
           } else if (recursionStack.contains(neighbor)) {
+            // Case 2: CYCLE DETECTED!
             return true;
           }
         }
