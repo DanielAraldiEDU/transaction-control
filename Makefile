@@ -12,10 +12,6 @@ $(CLASS_FILE): $(JAVA_FILE)
 run: $(CLASS_FILE)
 	java $(MAIN_CLASS)
 
-run-stress: $(CLASS_FILE)
-	@echo "Executando simulação com stress"
-	java $(MAIN_CLASS)
-
 clean:
 	rm -f *.class
 
